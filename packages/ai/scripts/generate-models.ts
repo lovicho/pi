@@ -1057,6 +1057,10 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					}
 				}
 
+				if (api === "openai-completions") {
+					compat = { ...(compat ?? {}), maxTokensField: "max_tokens" };
+				}
+
 				models.push({
 					id: modelId,
 					name: m.name || modelId,
@@ -1215,6 +1219,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			supportsReasoningEffort: false,
 			maxTokensField: "max_tokens",
 			supportsStrictMode: false,
+			thinkingFormat: "deepseek",
 		};
 
 		for (const { key, provider, baseUrl } of moonshotVariants) {
