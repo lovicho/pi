@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.79.6] - 2026-06-16
+
 ### Fixed
 
 - Fixed OpenCode Go DeepSeek V4 thinking-off requests to send the provider's `thinking: { type: "disabled" }` compatibility parameter.
