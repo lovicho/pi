@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.79.7] - 2026-06-18
+
 ### Added
 
 - Added GLM-5.2 model to the OpenCode Go subscription model catalog ([#5860](https://github.com/earendil-works/pi/issues/5860)).
