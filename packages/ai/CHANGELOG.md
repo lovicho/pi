@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.79.9] - 2026-06-20
+
 ### Added
 
 - Added configurable `chat-template` thinking support for OpenAI-compatible providers that use `chat_template_kwargs`, such as DeepSeek models behind vLLM ([#5673](https://github.com/earendil-works/pi/issues/5673)).
