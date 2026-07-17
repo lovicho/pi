@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.80.10] - 2026-07-16
+
 ### Fixed
 
 - Fixed Kimi Coding requests to use Anthropic adaptive thinking effort without token budgets, and enabled empty thinking signatures for K3 and `kimi-for-coding`.
