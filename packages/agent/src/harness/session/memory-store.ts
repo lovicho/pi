@@ -1,5 +1,8 @@
-import type { SessionMetadata, SessionSnapshot, SessionStore, SessionTreeEntry } from "../types.ts";
+import type { SessionForkSelection, SessionMetadata, SessionReader, SessionStore, SessionTreeEntry } from "../types.ts";
 import { SessionError } from "../types.ts";
+import { createArraySessionReader } from "./array-session-reader.ts";
+import { readSessionEntriesForFork } from "./fork.ts";
+import { KeyedOperationQueue } from "./keyed-operation-queue.ts";
 import { createSessionId, createTimestamp } from "./repository.ts";
 
 export type InMemorySessionCreateOptions = { id?: string };
@@ -9,54 +12,38 @@ interface InMemorySessionState {
 	entries: SessionTreeEntry[];
 }
 
-class SerialOperationQueue {
-	private tail: Promise<void> = Promise.resolve();
-
-	enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
-		const result = this.tail.then(operation);
-		this.tail = result.then(
-			() => undefined,
-			() => undefined,
-		);
-		return result;
-	}
-
-	async drain(): Promise<void> {
-		await this.tail;
-	}
-}
-
 class InMemorySessionStore implements SessionStore<SessionMetadata, InMemorySessionCreateOptions, void> {
 	private readonly sessions = new Map<string, InMemorySessionState>();
-	private readonly operations = new SerialOperationQueue();
+	private readonly operations = new KeyedOperationQueue<string>();
 	private disposed = false;
 	private disposePromise: Promise<void> | undefined;
 
-	create(options: InMemorySessionCreateOptions = {}): Promise<SessionSnapshot<SessionMetadata>> {
+	create(options: InMemorySessionCreateOptions = {}): Promise<SessionReader<SessionMetadata>> {
 		this.assertOpen();
-		return this.operations.enqueue(() => {
+		const id = options.id ?? createSessionId();
+		return this.operations.enqueue(id, () => {
 			const state: InMemorySessionState = {
-				metadata: { id: options.id ?? createSessionId(), createdAt: createTimestamp() },
+				metadata: { id, createdAt: createTimestamp() },
 				entries: [],
 			};
 			this.sessions.set(state.metadata.id, state);
-			return this.snapshot(state);
+			return this.reader(state);
 		});
 	}
 
-	load(metadata: SessionMetadata): Promise<SessionSnapshot<SessionMetadata>> {
+	load(metadata: SessionMetadata): Promise<SessionReader<SessionMetadata>> {
 		this.assertOpen();
-		return this.operations.enqueue(() => this.snapshot(this.getState(metadata)));
+		return this.operations.enqueue(metadata.id, () => this.reader(this.getState(metadata)));
 	}
 
 	list(): Promise<SessionMetadata[]> {
 		this.assertOpen();
-		return this.operations.enqueue(() => [...this.sessions.values()].map((state) => state.metadata));
+		return this.operations.enqueueBarrier(() => [...this.sessions.values()].map((state) => state.metadata));
 	}
 
 	appendEntry(metadata: SessionMetadata, entry: SessionTreeEntry): Promise<void> {
 		this.assertOpen();
-		return this.operations.enqueue(() => {
+		return this.operations.enqueue(metadata.id, () => {
 			const state = this.getState(metadata);
 			if (state.entries.some((existing) => existing.id === entry.id)) {
 				throw new SessionError("invalid_entry", `Entry ${entry.id} already exists`);
@@ -67,24 +54,32 @@ class InMemorySessionStore implements SessionStore<SessionMetadata, InMemorySess
 
 	delete(metadata: SessionMetadata): Promise<void> {
 		this.assertOpen();
-		return this.operations.enqueue(() => {
+		return this.operations.enqueue(metadata.id, () => {
 			this.sessions.delete(metadata.id);
 		});
 	}
 
 	fork(
-		_source: SessionMetadata,
+		source: SessionMetadata,
 		options: InMemorySessionCreateOptions,
-		entries: readonly SessionTreeEntry[],
-	): Promise<SessionSnapshot<SessionMetadata>> {
+		selection: SessionForkSelection,
+	): Promise<SessionReader<SessionMetadata>> {
 		this.assertOpen();
-		return this.operations.enqueue(() => {
+		const id = options.id ?? createSessionId();
+		const sourceEntries = this.operations.enqueue(source.id, () => {
+			const sourceState = this.getState(source);
+			return readSessionEntriesForFork(
+				createArraySessionReader(sourceState.metadata, () => sourceState.entries),
+				selection,
+			);
+		});
+		return this.operations.enqueue(id, async () => {
 			const state: InMemorySessionState = {
-				metadata: { id: options.id ?? createSessionId(), createdAt: createTimestamp() },
-				entries: [...entries],
+				metadata: { id, createdAt: createTimestamp() },
+				entries: [...(await sourceEntries)],
 			};
 			this.sessions.set(state.metadata.id, state);
-			return this.snapshot(state);
+			return this.reader(state);
 		});
 	}
 
@@ -106,8 +101,27 @@ class InMemorySessionStore implements SessionStore<SessionMetadata, InMemorySess
 		return state;
 	}
 
-	private snapshot(state: InMemorySessionState): SessionSnapshot<SessionMetadata> {
-		return { metadata: state.metadata, entries: [...state.entries] };
+	private reader(state: InMemorySessionState): SessionReader<SessionMetadata> {
+		const reader = createArraySessionReader(state.metadata, () => state.entries);
+		return {
+			metadata: reader.metadata,
+			readHead: () => {
+				this.assertOpen();
+				return this.operations.enqueue(state.metadata.id, () => reader.readHead());
+			},
+			readEntry: (id) => {
+				this.assertOpen();
+				return this.operations.enqueue(state.metadata.id, () => reader.readEntry(id));
+			},
+			readEntries: (options) => {
+				this.assertOpen();
+				return this.operations.enqueue(state.metadata.id, () => reader.readEntries(options));
+			},
+			readPathToRootOrCompaction: (leafId) => {
+				this.assertOpen();
+				return this.operations.enqueue(state.metadata.id, () => reader.readPathToRootOrCompaction(leafId));
+			},
+		};
 	}
 }
 
