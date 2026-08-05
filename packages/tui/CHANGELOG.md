@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Windows Shift+Enter detection by extending the native Win32 helper to report modifier key state.
+- Fixed the npm package omitting the source and build script needed to rebuild the Windows native addon.
 - Fixed the npm package omitting the source and build script needed to rebuild the Darwin native addon.
 - Fixed Windows console truecolor detection when Windows Terminal does not provide `WT_SESSION` to child shells.
 - Fixed terminal width accounting for Indic conjunct grapheme clusters ([#6124](https://github.com/earendil-works/pi/issues/6124) by [@petrroll](https://github.com/petrroll)).
@@ -13,9 +14,11 @@
 - Fixed alternate-screen Kitty images crossing vertical layout clip boundaries and overlapping sticky regions while scrolling.
 - Fixed alternate-screen redraws retransmitting Kitty image data when placements move or recently offscreen images return, dropping adjacent row content when reusing placements, rendering fixed-basis scroll content twice per frame, and scanning clipped transcript rows while painting.
 - Fixed fullscreen transcript navigation leaving no editor-accessible `Home`, `End`, `PageUp`, or `PageDown` variants by adding Ctrl-modified editor bindings ([#7574](https://github.com/earendil-works/pi/issues/7574)).
+- Fixed keyboard input rendering latency on Windows by letting input preempt the throttled render timer.
 
 ### Added
 
+- Added terminal-friendly Unicode rendering for LaTeX expressions in Markdown, including inline and display math, fractions, scripts, common symbols, aligned equations, cases, and matrices.
 - Added the shared `TuiMode` type and `mode` discriminants to the main-screen and alternate-screen TUI renderers.
 - Added TUI lifecycle and render-state handoff APIs for replacing renderers without replaying main-screen content.
 - Exported the bundled `Marked` parser and token types.
@@ -25,6 +28,7 @@
 - Added edge auto-scrolling for alternate-screen drag selection across off-screen scroll-view content.
 - Added proportional scrollbars with mouse dragging, Home/End document navigation, transient `auto` mode, and an `always` mode that reserves the rightmost column; scrollbar modes can be changed at runtime.
 - Added page scrolling and OSC 133 semantic prompt navigation to the alternate-screen viewport.
+- Added configurable previous/next prompt history actions for navigation independent of vertical cursor movement.
 
 ## [0.83.0] - 2026-07-29
 
