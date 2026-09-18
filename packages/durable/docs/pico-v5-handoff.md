@@ -17,7 +17,7 @@ facades, membranes, document routing, view projection, events, or clone chains.
 
 Implement IDs, sequences, reserved root conversation ID `1`,
 `ConversationRecord`, `EntryRecord`, tagged inputs, live/terminal `TaskRecord`
-values, document metadata, storage writes, backend-opaque JSON cursors, and
+values, document lifecycle records, storage writes, backend-opaque JSON cursors, and
 detached `MemoryStorage` tables.
 Reserve `Conversation` for the public conversation object, `Entry` for the typed
 entry definition, and `Task` for the typed executable definition returned by
@@ -49,7 +49,9 @@ deleted-page reuse, and representative storage sizes.
 
 Implement table writes in `main.jsonl`, one document sidecar per incarnation,
 one sidecar per live task, and one main marker per commit. Do not add a
-standalone-sidecar protocol.
+standalone-sidecar protocol. Serialization must also provide the storage ownership
+boundary: retained indexes/materializations are detached from write arguments,
+and reads never expose backend-owned cached objects.
 
 Fault-test torn/short sidecar writes, failures between sidecars, every marker
 boundary, unconfirmed tails, missing confirmed data, and poisoned writes.
@@ -77,8 +79,8 @@ unload/reload.
 
 ## 7. Document definitions and access
 
-Implement `defineDoc`, `defineDocFamily`, identity validation, the three direct
-scopes, and get-or-create `tx.doc`, `snapshot`, and `documentSource` acquisition.
+Implement `defineDoc`, `defineDocFamily`, document kind/key validation, the three
+direct scopes, and get-or-create `tx.doc`, `snapshot`, and `documentSource` acquisition.
 
 Test concurrent initialization once, initial bases, detached snapshots, family
 initializer use only on first creation, scope/target mismatch, terminal-task
