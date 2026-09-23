@@ -2096,11 +2096,12 @@ benchmarks.
 
 ### 11.3 JSONL
 
-JSONL uses reclaimable sidecars without exposing them to the harness. Persistence
-alone does not provide the ownership boundary: any decoded indexes, materialized
-values, or caches retained in memory must be detached from commit arguments and
-must not be exposed directly by reads. A JSONL backend cannot simply add file
-appends around aliasing memory tables.
+JSONL depends on the portable `FileSystem` capability, not the broader
+`ExecutionEnv`. It uses reclaimable sidecars without exposing them to the
+harness. Persistence alone does not provide the ownership boundary: any decoded
+indexes, materialized values, or caches retained in memory must be detached from
+commit arguments and must not be exposed directly by reads. A JSONL backend
+cannot simply add file appends around aliasing memory tables.
 
 ```text
 main.jsonl       table writes, document records, and one marker per commit
@@ -2115,9 +2116,14 @@ Publication protocol:
 3. Publish in memory only after the marker write succeeds.
 
 Every commit uses this protocol; there is no standalone-sidecar fast path.
-Without `fsync`, it guarantees ordinary process-crash consistency, not survival
-of power, host, kernel, or filesystem failure. Durable mode flushes sidecars
-before the marker.
+JSONL creation accepts an `fsync` option that defaults to `false`. Without
+`fsync`, it guarantees ordinary process-crash consistency, not survival of
+power, host, kernel, or filesystem failure. With `fsync: true`, the backend
+appends all affected sidecar records, flushes each affected sidecar, and only
+then appends the main marker. It does not explicitly flush `main.jsonl`; an
+acknowledged tail commit may therefore still disappear, but a marker that
+survives should not overtake its sidecar data. A main-only commit has no
+sidecars to flush.
 
 Recovery:
 
