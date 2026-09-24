@@ -55,9 +55,9 @@ Required invariants:
 3. All visible progress is durable. There is no volatile publication path.
 4. External effects do not run inside the Session mutation transaction.
 5. Entries and IDs are immutable and never reused after a committed write.
-6. Document drafts are sealed against mutation when their transaction callback
-   settles and fully revoked when their change adopts or aborts. Values assigned
-   into a draft are copied by value.
+6. Document drafts are fully revoked when their transaction callback settles:
+   the Session synchronously prepares or aborts every open change at that point.
+   Values assigned into a draft are copied by value and must be strict JSON.
 7. The mutation line remains held through storage settlement and committed-state
    adoption. Listener callbacks run later, off the line.
 8. An uncertain storage failure is fatal to the open Session. It publishes
@@ -908,7 +908,7 @@ interface Tracker<T extends object> {
 Each loaded document owns one tracker whose `value` is its current immutable
 revision. Immutability is a trusted ownership contract, not runtime freezing:
 a revision and its descendants must never be mutated after transfer to the
-tracker. `prepare()` seals draft writes, emits detached self-contained
+tracker. `prepare()` revokes the draft, emits detached self-contained
 operations, and computes `value` with the optimized immutable applier before
 Storage admission. Unchanged subtrees are structurally shared with `base`.
 Operation placement payloads may also be shared with `value`; mutating either a
@@ -933,15 +933,13 @@ begin transaction
   acquire and memoize document changes by logical address
   mutate revocable Astra overlay drafts
 callback settles
-  seal Tx and every draft against further mutation
+  seal Tx; synchronously prepare or abort every open change, revoking every draft
   if any acquisition is pending: abort open changes, reject, then drain and abort it
 callback fails with no pending acquisition
   abort every open change; persist and publish nothing
 callback succeeds with no pending acquisition
   prepare every open change -> immutable next revision + self-contained Chord Op[]
-  validate strict JSON in operation placement payloads
   Session evaluates each required/ordinary document write exactly once
-  validate strict JSON in every selected complete base
   prepare every affected loaded conversation mount revision
   Storage.commit persists the atomic batch while the Session line remains held
 storage succeeds
@@ -953,15 +951,20 @@ storage fails
 
 A pending acquisition that resolves after sealing never exposes a draft; its
 change is aborted and its promise rejects. The Session observes every such
-settlement before releasing the line. Initializer, migration, fork-copy, loaded,
-and replacement roots are detached into exclusive kernel ownership before they
-become immutable tracker revisions; migration callbacks never receive a live
-tracker revision.
+settlement before releasing the line. Initializer, migration, and replacement
+roots come from caller code: the Session copies each one into exclusive kernel
+ownership, rejecting any value that is not strict JSON, before it becomes an
+immutable tracker revision. Loaded and fork-copy roots are already detached
+strict JSON from Storage and enter the tracker without another copy. Chord's
+`track()` and `prepareReplace()` take ownership in O(1) without traversal, so
+every root they receive must come from one of these sources. Migration callbacks
+never receive a live tracker revision.
 
 Preparation, validation, checkpoint, or mounted-view preparation failure occurs
-before Storage admission and rolls back normally. Strict-JSON validation walks
-every prepared operation placement payload and every complete value selected as
-a base. Tracker branding and `baseRevision` enforce ownership and staleness; the
+before Storage admission and rolls back normally. The Session performs no
+strict-JSON walk of prepared operations or selected bases: roots are checked on
+entry and Chord checks every draft placement, so every revision, operation
+payload, and base is strict JSON by construction. Tracker branding and `baseRevision` enforce ownership and staleness; the
 Session never substitutes caller-created prepared values. The prepared immutable
 candidate itself becomes the adopted and published value. Storage receives that complete value only when the
 Session selects a base; otherwise it receives only the prepared operation batch.
@@ -972,9 +975,14 @@ version transitions still write a base when their prepared batch is empty; an
 equal-value version base does not emit a watch update.
 
 Values assigned into a draft are copied immediately by value. Repeated
-placements are independent. Draft writes and all `Tx` operations reject after
-the callback settles; draft reads remain borrowed until adopt or abort fully
-revokes every handle before `commit()` settles.
+placements are independent. Chord checks each placement while copying it and
+throws at the offending assignment, before the draft changes, when the value is
+not strict JSON: `undefined` array elements or nested object values, non-finite
+numbers, functions, symbols, bigints, accessors, symbol keys, sparse arrays, or
+objects whose prototype is neither `Object.prototype` nor `null`. Assigning
+`undefined` directly to an object property deletes that property. Draft reads, draft writes, and all `Tx` operations
+reject after the callback settles. The prepared immutable value remains readable
+by Session-owned checkpoint and Storage preparation.
 
 ```ts
 let escaped: Draft<LiveState>;
@@ -1492,6 +1500,12 @@ becomes one text content item; no stream becomes an empty content list. Explicit
 text in explicit result content is bounded by the same limits before transcript
 persistence; non-text content is retained as declared by its pi-ai type.
 
+`stream()` never spills complete output to a file because spilling requires a
+filesystem, which may be remote or unavailable. A tool that must preserve
+complete output spills through the `ExecutionEnv` or `FileSystem` it was given,
+such as shell execution with spill capture, and reports the resulting path in its
+result details or progress.
+
 `progress(value)` replaces the invocation's complete JSON `progress` payload; it
 does not merge keys. Its promise resolves after the corresponding or coalesced
 document commit. During normal settlement, accepted output updates drain before
@@ -1705,7 +1719,7 @@ does not delete transcript history.
 
 ### 9.1 Document source
 
-Chord exposes this source-adoption contract from its replicated-state layer:
+Chord's existing replicated-state layer exposes this source-adoption contract:
 
 ```ts
 interface ReplicatedStateSourceFrame<T> {
@@ -2173,9 +2187,8 @@ initial implementation.
 
 These are contracts, not invitations to add defensive machinery:
 
-- **Detached draft work:** draft writes and all `Tx` operations reject after the
-  Session callback settles. Draft reads remain borrowed until adoption or abort
-  revokes every handle before `commit()` settles. Fire-and-forget work that runs
+- **Detached draft work:** draft reads, draft writes, and all `Tx` operations
+  reject after the Session callback settles. Fire-and-forget work that runs
   before callback settlement can still mutate the active transaction and is
   unsupported.
 - **Read after write:** read every required table row before the first table
